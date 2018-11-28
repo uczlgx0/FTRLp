@@ -211,24 +211,28 @@ class DataGen(object):
                 self.names[key] = num_size + i
 
             # --- Categorical features
-            # Categorical features are hashed. For each different kind a
+            # Categorical features are saved in order of appearance. For each different kind a
             # hashed index is created and a value of 1 is 'stored' in that
             # position.
             for key in self.cat:
                 # --- Category
                 # Get the categorial variable from row
                 value = row[key]
+                # One-hot encode every categorical feature
+                if key + '_' + value not in self.names:
+                    if len(self.names) < self.mf:
+                        index = len(self.names)
 
-                # --- Hash
-                # One-hot encode everything with hash trick
-                index = (abs(hash(key + '_' + value)) % (self.mf - size)) + size
+                        # --- Save Name
+                        # Save the name and index to the names dictionary if it is a new feature
+                        # AND if there's still enough space.
+                        self.names[key + '_' + value] = index
+                    else:
+                        index = None
+                        assert len(self.names) > self.mf, 'Not enough dimensions to fit all features.'
+                else:
+                    index = self.names[key + '_' + value]
                 x[index] = 1.
-
-                # --- Save Name
-                # Save the name and index to the names dictionary if its a new feature
-                # AND if there's still enough space.
-                if key + '_' + value not in self.names and len(self.names) < self.mf:
-                    self.names[key + '_' + value] = index
 
             # Yield everything.
             yield t, ids, x, y
