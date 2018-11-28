@@ -386,12 +386,6 @@ class FTRLP(object):
         # without overwriting the object.
         self.fit_flag = False
 
-    def _build_p(self, data_gen, path):
-        # Maybe is worth migrating the weight construction algorithm
-        # to here, I think it could clean up the code a little a bit
-        # in both train and predict methods.
-        pass
-
     def _clear_params(self):
         """
         If the fit method is called multiple times, all trained parameters
@@ -529,64 +523,7 @@ class FTRLP(object):
             if random() > self.subsample and (t + 1) % self.rate != 0:
                 continue
 
-            # --- Dot product init.
-            # The dot product is computed as the weights are calculated,
-            # here it is initiated at zero.
-            wtx = 0
-
-            # --- Real time weights
-            # Initialize an empty dictionary to hold the weights
-            w = {}
-
-            # --- Weights and prediction
-            # Computes the weights for numerical features using the
-            # indexes and values present in the x dictionary. And make
-            # a prediction.
-
-            # This first loop build the weight vector on the fly. Since
-            # we expect most weights to be zero, the weight vector can
-            # be constructed in real time. Furthermore, there is no
-            # reason to store it, neither to clear it, since at each
-            # iteration only the relevant indexes are populated and used.
-            for indx in x.keys():
-                # --- Loop over indicator I
-                # x.keys() carries all the indexes of the feature
-                # vector with non-zero entries. Therefore, we can
-                # simply loop over it since anything else will not
-                # contribute to the dot product w.x, and, consequently
-                # to the prediction.
-                if fabs(self.z[indx]) <= self.l1:
-                    # --- L1 regularization
-                    # If the condition on the absolute value of the
-                    # vector Z is not met, the weight coefficient is
-                    # set exactly to zero.
-                    w[indx] = 0
-                else:
-                    # --- Non zero weight
-                    # Provided abs(z_i) is large enough, the weight w_i
-                    # is computed. First, the sign of z_i is determined.
-                    sign = 1. if self.z[indx] >= 0 else -1.
-
-                    # Then the value of w_i if computed and stored. Note
-                    # that any previous value w_i may have had will be
-                    # overwritten here. Which is fine since it will not
-                    # be used anywhere outside this (t) loop.
-                    w[indx] = - (self.z[indx] - sign * self.l1) / \
-                                (self.l2 + (self.beta + sqrt(self.n[indx])) / self.alpha)
-
-                # --- Update dot product
-                # Once the value of w_i is computed we can use to compute
-                # the i-th contribution to the dot product w.x. Which, here
-                # is being done inside the index loop, compute only coordinates
-                # that could possible be non-zero.
-                wtx += w[indx] * x[indx]
-
-            # --- Make a prediction
-            # With the w.x dot product in hand we can compute the output
-            # probability by putting wtx through the sigmoid function.
-            # We limit wtx value to lie in the [-35, 35] interval to
-            # avoid round off errors.
-            p = 1. / (1. + exp(-max(min(wtx, 35.), -35.)))
+            p, w = self.predict_proba(x)
 
             # --- Update the loss function
             # Now we look at the target value and use it, together with the
@@ -693,98 +630,77 @@ class FTRLP(object):
         # Call the fit method and proceed as normal
         self.fit(data_gen, path)
 
-    def predict_proba(self, data_gen, path):
+    def predict_proba(self, x):
         """
         --- Predicting Probabilities method ---
 
         Predictions...
 
-        :param data_gen: An instance of the DataGen class
-        :param path: The path to the test set
-
-        :return: A list with predicted probabilities
+        :param x: Feature values
+        :return: Predicted probability, weight vector
         """
 
-        # --- Results
-        # Initialize an empty list to hold predicted values.
-        result = []
+        # --- Dot product init.
+        # The dot product is computed as the weights are calculated,
+        # here it is initiated at zero.
+        wtx = 0
 
-        # --- Start the clock!
-        start_time = datetime.now()
+        # --- Real time weights
+        # Initialize an empty dictionary to hold the weights
+        w = {}
 
-        for t, x in data_gen.test(path):
-            # --- Variables
-            #   t: Current row
-            #   x: Feature values
+        # --- Weights and prediction
+        # Computes the weights for numerical features using the
+        # indexes and values present in the x dictionary. And make
+        # a prediction.
 
-            # --- Dot product init.
-            # The dot product is computed as the weights are calculated,
-            # here it is initiated at zero.
-            wtx = 0
+        # This first loop build the weight vector on the fly. Since
+        # we expect most weights to be zero, the weight vector can
+        # be constructed in real time. Furthermore, there is no
+        # reason to store it, neither to clear it, since at each
+        # iteration only the relevant indexes are populated and used.
+        for indx in x.keys():
+            # --- Loop over indicator I
+            # x.keys() carries all the indexes of the feature
+            # vector with non-zero entries. Therefore, we can
+            # simply loop over it since anything else will not
+            # contribute to the dot product w.x, and, consequently
+            # to the prediction.
+            if fabs(self.z[indx]) <= self.l1:
+                # --- L1 regularization
+                # If the condition on the absolute value of the
+                # vector Z is not met, the weight coefficient is
+                # set exactly to zero.
+                w[indx] = 0
+            else:
+                # --- Non zero weight
+                # Provided abs(z_i) is large enough, the weight w_i
+                # is computed. First, the sign of z_i is determined.
+                sign = 1. if self.z[indx] >= 0 else -1.
 
-            # --- Real time weights
-            # Initialize an empty dictionary to hold the weights
-            w = {}
+                # Then the value of w_i if computed and stored. Note
+                # that any previous value w_i may have had will be
+                # overwritten here. Which is fine since it will not
+                # be used anywhere outside this predict.
+                w[indx] = - (self.z[indx] - sign * self.l1) / \
+                            (self.l2 + (self.beta + sqrt(self.n[indx])) / self.alpha)
 
-            # --- Weights and prediction
-            # Computes the weights for numerical features using the
-            # indexes and values present in the x dictionary. And make
-            # a prediction.
+            # --- Update dot product
+            # Once the value of w_i is computed we can use to compute
+            # the i-th contribution to the dot product w.x. Which, here
+            # is being done inside the index loop, compute only coordinates
+            # that could possible be non-zero.
+            wtx += w[indx] * x[indx]
 
-            # This first loop build the weight vector on the fly. Since
-            # we expect most weights to be zero, the weight vector can
-            # be constructed in real time. Furthermore, there is no
-            # reason to store it, neither to clear it, since at each
-            # iteration only the relevant indexes are populated and used.
-            for indx in x.keys():
-                # --- Loop over indicator I
-                # x.keys() carries all the indexes of the feature
-                # vector with non-zero entries. Therefore, we can
-                # simply loop over it since anything else will not
-                # contribute to the dot product w.x, and, consequently
-                # to the prediction.
-                if fabs(self.z[indx]) <= self.l1:
-                    # --- L1 regularization
-                    # If the condition on the absolute value of the
-                    # vector Z is not met, the weight coefficient is
-                    # set exactly to zero.
-                    w[indx] = 0
-                else:
-                    # --- Non zero weight
-                    # Provided abs(z_i) is large enough, the weight w_i
-                    # is computed. First, the sign of z_i is determined.
-                    sign = 1. if self.z[indx] >= 0 else -1.
+        # --- Make a prediction
+        # With the w.x dot product in hand we can compute the output
+        # probability by putting wTx through the sigmoid function.
+        # We limit wTx value to lie in the [-35, 35] interval to
+        # avoid round off errors.
+        result= 1. / (1. + exp(-max(min(wtx, 35.), -35.)))
 
-                    # Then the value of w_i if computed and stored. Note
-                    # that any previous value w_i may have had will be
-                    # overwritten here. Which is fine since it will not
-                    # be used anywhere outside this (t) loop.
-                    w[indx] = - (self.z[indx] - sign * self.l1) / \
-                                (self.l2 + (self.beta + sqrt(self.n[indx])) / self.alpha)
-
-                # --- Update dot product
-                # Once the value of w_i is computed we can use to compute
-                # the i-th contribution to the dot product w.x. Which, here
-                # is being done inside the index loop, compute only coordinates
-                # that could possible be non-zero.
-                wtx += w[indx] * x[indx]
-
-            # --- Make a prediction
-            # With the w.x dot product in hand we can compute the output
-            # probability by putting wTx through the sigmoid function.
-            # We limit wTx value to lie in the [-35, 35] interval to
-            # avoid round off errors.
-            result.append(1. / (1. + exp(-max(min(wtx, 35.), -35.))))
-
-            # Verbose section - Still needs work...
-            if (t + 1) % self.rate == 0:
-                # print some stuff
-                print('Test Samples: {0:8} | '
-                      'Time taken: {1:3} seconds'.format(t + 1,
-                                                         (datetime.now() - start_time).seconds))
-
-        # All done, return the predictions!
-        return result
+        # All done, return the prediction and weights!
+        return result, w
 
     def predict(self, data_gen, path):
         """
@@ -800,7 +716,15 @@ class FTRLP(object):
 
         # --- Probabilities
         # Compute probabilities by invoking the predict_proba method
-        probs = self.predict_proba(data_gen, path)
+        probs=[]
+        for t, x in data_gen.test(path):
+            probs.append(self.predict_proba(x)[0])
+            # Verbose section - Still needs work...
+            if (t + 1) % self.rate == 0:
+                # print some stuff
+                print('Test Samples: {0:8} | '
+                      'Time taken: {1:3} seconds'.format(t + 1,
+                                                         (datetime.now() - start_time).seconds))
 
         # --- Return
         # Return binary labels. The threshold is set using the mean value of the
