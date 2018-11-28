@@ -125,7 +125,6 @@ class DataGen(object):
         else:
             self.num_cols = []
 
-
         # --- Something to build model on
         # Make sure the user passed some information on the columns to
         # be used to build the model upon
@@ -172,6 +171,7 @@ class DataGen(object):
             #
             x = {}
 
+            num_size = 0
             # --- Enough features?
             # For the very first row make sure we have enough features (max features
             # is large enough) by computing the number of numerical columns and
@@ -354,14 +354,6 @@ class FTRLP(object):
         # and, in order to keep the memory cost low, it is a dictionary
         # that receives values and keys as needed.
 
-        # --- Coefficients
-        # Lists to store the coefficients and their corresponding names.
-        # Initialized to None and constructed once the training method is
-        # completed. In case of multiple epochs, these quantities will be
-        # computed multiple times.
-        self.coef_ = {}
-        self.cname = None
-
         # --- Target Ratio
         # Store the ratio of each class of a binnary target variable to use
         # it to make weighted discrete label predictions.
@@ -401,15 +393,10 @@ class FTRLP(object):
         self.loss = []
         self.z = None
         self.n = None
-        self.coef_ = {}
-        self.cname = None
 
-    def get_params(self, deep=True):
+    def get_params(self):
         """
         A function to return a map of parameters names and values.
-
-        :param deep: Not sure yet, gotta check sklearn usage.
-
         :return: Dictionary mapping parameters names to their values
         """
 
@@ -423,15 +410,32 @@ class FTRLP(object):
 
         return ps
 
+    def get_model_parameters(self, names):
+        """
+        get model parameters for next use
+        :param names: data_gen.names
+        :return: [name, index, z, n, w, eta]
+        """
+        # eta is uncertain score of feature. See "Ad click prediction: a view from the trenches."
+        parameters = []
+        for k, v in names.items():
+            if fabs(self.z[v]) <= self.l1:
+                w = 0
+            else:
+                sign = 1. if self.z[v] >= 0 else -1.
+                w = - (self.z[v] - sign * self.l1) / (self.l2 + (self.beta + sqrt(self.n[v])) / self.alpha)
+            eta = self.alpha / (sqrt(self.n[v]) + self.beta)
+            parameters.append([k, v, self.z[v], self.n[v], w, eta])
+        return parameters
+
     def set_params(self, **params):
         """
-
-
+        load parameters
         :param params:
-        :return:
+        :return: Nothing
         """
 
-        for key, value in params.iteritems():
+        for key, value in params.items():
             setattr(self, key, value)
 
     def _update(self, y, p, x, w):
@@ -493,7 +497,7 @@ class FTRLP(object):
 
         :param data_gen: An instance of the DataGen class
         :param path: The path to the training set
-        :return:
+        :return: Nothing
         """
 
         # Best way? Proper coding means no access to protected members...
@@ -519,7 +523,6 @@ class FTRLP(object):
             # training time. Since online methods can't
             # really be shuffle we can use this combined
             # with multiple epochs to create heterogeneity.
-            #if random() > self.subsample and ((t + 1) % self.rate != 0):
             if random() > self.subsample and (t + 1) % self.rate != 0:
                 continue
 
@@ -549,19 +552,13 @@ class FTRLP(object):
             # knowledge.
             self._update(y, p, x, w)
 
-        # --- Coefficient names and indexes
-        # Bind the feature names to their corresponding coefficient obtained from
-        # the regression.
-        self.coef_.update(dict([[key, self.z[data_gen.names[key]]] for key in data_gen.names.keys()]))
-
-
     def fit(self, data_gen, path):
         """
         Epoch wrapper around the main fitting method _train
 
         :param data_gen: An instance of the DataGen class
         :param path: The path to the training set
-        :return:
+        :return: Nothing
         """
 
         # --- Check fit flag
@@ -617,11 +614,11 @@ class FTRLP(object):
 
         :param data_gen: An instance of the DataGen class
         :param path: The path to the training set
-        :return:
+        :return: Nothing
         """
 
         # --- Fit Flag
-        # Start by reseting fit_flag to false to "trick"
+        # Start by resetting fit_flag to false to "trick"
         # the fit method into keep training without overwriting
         # previously calculated quantities.
         self.fit_flag = False
@@ -682,8 +679,7 @@ class FTRLP(object):
                 # that any previous value w_i may have had will be
                 # overwritten here. Which is fine since it will not
                 # be used anywhere outside this predict.
-                w[indx] = - (self.z[indx] - sign * self.l1) / \
-                            (self.l2 + (self.beta + sqrt(self.n[indx])) / self.alpha)
+                w[indx] = - (self.z[indx] - sign * self.l1) / (self.l2 + (self.beta + sqrt(self.n[indx])) / self.alpha)
 
             # --- Update dot product
             # Once the value of w_i is computed we can use to compute
@@ -697,7 +693,7 @@ class FTRLP(object):
         # probability by putting wTx through the sigmoid function.
         # We limit wTx value to lie in the [-35, 35] interval to
         # avoid round off errors.
-        result= 1. / (1. + exp(-max(min(wtx, 35.), -35.)))
+        result = 1. / (1. + exp(-max(min(wtx, 35.), -35.)))
 
         # All done, return the prediction and weights!
         return result, w
@@ -716,7 +712,8 @@ class FTRLP(object):
 
         # --- Probabilities
         # Compute probabilities by invoking the predict_proba method
-        probs=[]
+        probs = []
+        start_time = datetime.now()
         for t, x in data_gen.test(path):
             probs.append(self.predict_proba(x)[0])
             # Verbose section - Still needs work...
@@ -729,4 +726,4 @@ class FTRLP(object):
         # --- Return
         # Return binary labels. The threshold is set using the mean value of the
         # target variable.
-        return map(lambda x: 0 if x <= self.target_ratio else 1, probs)
+        return map(lambda y: 0 if y <= self.target_ratio else 1, probs)
